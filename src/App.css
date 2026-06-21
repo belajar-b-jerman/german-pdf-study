@@ -332,9 +332,8 @@
   background: rgba(255, 255, 255, 0.86);
 }
 
-.text-annotation button {
+.text-annotation > button {
   position: absolute;
-  top: -12px;
   right: -12px;
   display: none;
   align-items: center;
@@ -348,8 +347,18 @@
   background: #ffffff;
 }
 
-.text-annotation.active button,
-.text-annotation:focus-within button {
+.text-annotation > button:last-child {
+  top: -12px;
+}
+
+.text-annotation .drag-handle {
+  top: 20px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.text-annotation.active > button,
+.text-annotation:focus-within > button {
   display: inline-flex;
 }
 
@@ -563,6 +572,10 @@ input {
     background: #edf1f6;
   }
 
+  .reader-fullscreen.show-tools .reader-panel {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
   .reader-fullscreen .library-panel,
   .reader-fullscreen .study-panel {
     position: fixed;
@@ -596,15 +609,12 @@ input {
 
   .reader-fullscreen .reader-toolbar,
   .reader-fullscreen .color-row {
-    position: fixed;
-    left: 10px;
-    right: 10px;
     z-index: 18;
     display: none;
     border: 1px solid rgba(203, 213, 225, 0.9);
-    border-radius: 10px;
+    border-radius: 0;
     background: rgba(255, 255, 255, 0.96);
-    box-shadow: 0 14px 38px rgba(15, 23, 42, 0.18);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
     backdrop-filter: blur(14px);
   }
 
@@ -614,16 +624,16 @@ input {
   }
 
   .reader-fullscreen .reader-toolbar {
-    top: calc(10px + env(safe-area-inset-top));
     align-items: center;
     flex-wrap: wrap;
-    padding: 8px;
+    padding: calc(8px + env(safe-area-inset-top)) 8px 8px;
+    border-width: 0 0 1px;
   }
 
   .reader-fullscreen .color-row {
-    top: calc(108px + env(safe-area-inset-top));
     gap: 8px;
     padding: 8px;
+    border-width: 0 0 1px;
   }
 
   .reader-fullscreen .tool-group {
@@ -641,6 +651,11 @@ input {
     overflow: hidden;
     padding: 8px;
     background: #dfe7f0;
+    transition: height 0.18s ease;
+  }
+
+  .reader-fullscreen.show-tools .page-stage {
+    height: calc(100svh - 198px - env(safe-area-inset-bottom));
   }
 
   .reader-fullscreen .canvas-stack {
@@ -658,7 +673,7 @@ input {
     right: 10px;
     bottom: calc(8px + env(safe-area-inset-bottom));
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 6px;
     padding: 7px;
     border: 1px solid rgba(203, 213, 225, 0.9);
@@ -690,10 +705,6 @@ input {
     display: block;
     border: 0;
     background: rgba(15, 23, 42, 0.26);
-  }
-
-  .reader-fullscreen.show-tools .mobile-scrim {
-    background: transparent;
   }
 
   .reader-fullscreen .panel-close {

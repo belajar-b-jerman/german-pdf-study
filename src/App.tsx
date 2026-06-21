@@ -10,7 +10,6 @@ import {
   Highlighter,
   ListChecks,
   Maximize2,
-  Minimize2,
   Minus,
   MousePointer2,
   NotebookTabs,
@@ -128,6 +127,15 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const gestureRef = useRef<{ x: number; y: number } | null>(null)
+  const textDragRef = useRef<{
+    id: string
+    startX: number
+    startY: number
+    originalX: number
+    originalY: number
+    latestX: number
+    latestY: number
+  } | null>(null)
   const wheelRef = useRef(0)
   const [docs, setDocs] = useState<DocRecord[]>([])
   const [bundledPdfs, setBundledPdfs] = useState<BundledPdf[]>([])
@@ -142,7 +150,6 @@ function App() {
   const [showLibrary, setShowLibrary] = useState(false)
   const [showTools, setShowTools] = useState(false)
   const [showStudy, setShowStudy] = useState(false)
-  const [fullScreenReader, setFullScreenReader] = useState(true)
   const [color, setColor] = useState(colors[0])
   const [strokes, setStrokes] = useState<Stroke[]>([])
   const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([])
@@ -241,7 +248,7 @@ function App() {
       cancelled = true
       window.removeEventListener('resize', fitPage)
     }
-  }, [fitToScreen, page, pdfDoc])
+  }, [fitToScreen, page, pdfDoc, showTools])
 
   useEffect(() => {
     let cancelled = false
@@ -353,6 +360,13 @@ function App() {
     }
   }
 
+  function boundedPagePoint(x: number, y: number) {
+    return {
+      x: Math.max(0.01, Math.min(0.92, x)),
+      y: Math.max(0.01, Math.min(0.94, y)),
+    }
+  }
+
   async function eraseAt(point: { x: number; y: number }) {
     const filtered = strokes.filter((stroke) => !stroke.points.some((item) => pointDistance(item, point) < 0.025))
     const remainingText = textAnnotations.filter((item) => pointDistance({ x: item.x, y: item.y }, point) > 0.04)
@@ -420,6 +434,19 @@ function App() {
   }
 
   async function endStroke(event?: React.PointerEvent<HTMLCanvasElement>) {
+    if (event && gestureRef.current && tool === 'cursor') {
+      const dx = event.clientX - gestureRef.current.x
+      const dy = event.clientY - gestureRef.current.y
+      const stage = pageStageRef.current?.getBoundingClientRect()
+      const isTap = Math.abs(dx) < 16 && Math.abs(dy) < 16
+      if (isTap && stage) {
+        const x = (event.clientX - stage.left) / stage.width
+        if (x < 0.22) setPage((current) => Math.max(1, current - 1))
+        if (x > 0.78) setPage((current) => Math.min(pageCount || 1, current + 1))
+      }
+      return
+    }
+
     if (event && gestureRef.current && navMode !== 'buttons') {
       const dx = event.clientX - gestureRef.current.x
       const dy = event.clientY - gestureRef.current.y
@@ -479,6 +506,44 @@ function App() {
     const next = textAnnotations.filter((item) => item.id !== id)
     setTextAnnotations(next)
     setActiveTextId('')
+    await saveTextAnnotations(activeDocId, page, next)
+  }
+
+  function startTextDrag(event: React.PointerEvent<HTMLButtonElement>, item: TextAnnotation) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setActiveTextId(item.id)
+    textDragRef.current = {
+      id: item.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      originalX: item.x,
+      originalY: item.y,
+      latestX: item.x,
+      latestY: item.y,
+    }
+  }
+
+  function moveTextDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = textDragRef.current
+    const stack = pdfCanvasRef.current?.getBoundingClientRect()
+    if (!drag || !stack) return
+    const next = boundedPagePoint(
+      drag.originalX + (event.clientX - drag.startX) / stack.width,
+      drag.originalY + (event.clientY - drag.startY) / stack.height,
+    )
+    drag.latestX = next.x
+    drag.latestY = next.y
+    setTextAnnotations((items) => items.map((item) => (item.id === drag.id ? { ...item, ...next } : item)))
+  }
+
+  async function endTextDrag() {
+    const drag = textDragRef.current
+    if (!drag || !activeDocId) return
+    const next = textAnnotations.map((item) => (item.id === drag.id ? { ...item, x: drag.latestX, y: drag.latestY } : item))
+    setTextAnnotations(next)
+    textDragRef.current = null
     await saveTextAnnotations(activeDocId, page, next)
   }
 
@@ -636,18 +701,15 @@ function App() {
 
   return (
     <main
-      className={`app-shell ${showLibrary ? 'show-library' : ''} ${showTools ? 'show-tools' : ''} ${showStudy ? 'show-study' : ''} ${
-        fullScreenReader ? 'reader-fullscreen' : 'reader-windowed'
-      }`}
+      className={`app-shell reader-fullscreen ${showLibrary ? 'show-library' : ''} ${showTools ? 'show-tools' : ''} ${showStudy ? 'show-study' : ''}`}
     >
-      {(showLibrary || showTools || showStudy) && (
+      {(showLibrary || showStudy) && (
         <button
           className="mobile-scrim"
           type="button"
           aria-label="Tutup panel"
           onClick={() => {
             setShowLibrary(false)
-            setShowTools(false)
             setShowStudy(false)
           }}
         />
@@ -853,6 +915,17 @@ function App() {
                       onFocus={() => setActiveTextId(item.id)}
                       onChange={(event) => updateTextAnnotation(item.id, { text: event.target.value })}
                     />
+                    <button
+                      className="drag-handle"
+                      type="button"
+                      title="Geser jawaban"
+                      onPointerDown={(event) => startTextDrag(event, item)}
+                      onPointerMove={moveTextDrag}
+                      onPointerUp={endTextDrag}
+                      onPointerCancel={endTextDrag}
+                    >
+                      <MousePointer2 size={14} />
+                    </button>
                     <button type="button" title="Hapus teks" onClick={() => removeTextAnnotation(item.id)}>
                       <Trash2 size={14} />
                     </button>
@@ -868,25 +941,37 @@ function App() {
           )}
         </div>
         <nav className="mobile-reader-dock" aria-label="Mobile reader controls">
-          <button type="button" onClick={() => setShowLibrary(true)}>
+          <button
+            type="button"
+            onClick={() => {
+              setShowLibrary(true)
+              setShowTools(false)
+              setShowStudy(false)
+            }}
+          >
             <FolderOpen size={20} />
             File
           </button>
-          <button type="button" onClick={() => setShowTools(true)}>
+          <button type="button" onClick={() => setPage(Math.max(1, page - 1))}>
+            <Minus size={20} />
+            Prev
+          </button>
+          <button type="button" onClick={() => setShowTools((value) => !value)}>
             <SlidersHorizontal size={20} />
             Tools
+          </button>
+          <button type="button" onClick={() => setPage(Math.min(pageCount || 1, page + 1))}>
+            <Plus size={20} />
+            Next
           </button>
           <button
             type="button"
             onClick={() => {
-              setFitToScreen(true)
-              setFullScreenReader((value) => !value)
+              setShowStudy(true)
+              setShowTools(false)
+              setShowLibrary(false)
             }}
           >
-            {fullScreenReader ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
-            {fullScreenReader ? 'Exit' : 'Full'}
-          </button>
-          <button type="button" onClick={() => setShowStudy(true)}>
             <NotebookTabs size={20} />
             Notes
           </button>
