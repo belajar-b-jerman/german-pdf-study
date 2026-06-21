@@ -1,4 +1,4 @@
-export type Tool = 'pen' | 'highlighter' | 'line' | 'text' | 'eraser'
+export type Tool = 'cursor' | 'pen' | 'highlighter' | 'line' | 'text' | 'eraser'
 
 export type NavMode = 'buttons' | 'swipe' | 'scroll'
 
@@ -10,7 +10,7 @@ export type Point = {
 export type Stroke = {
   id: string
   page: number
-  tool: Exclude<Tool, 'eraser' | 'text'>
+  tool: Exclude<Tool, 'cursor' | 'eraser' | 'text'>
   color: string
   width: number
   points: Point[]

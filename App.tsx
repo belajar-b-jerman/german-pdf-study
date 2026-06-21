@@ -6,12 +6,18 @@ import {
   Download,
   Eraser,
   FileUp,
+  FolderOpen,
   Highlighter,
   ListChecks,
+  Maximize2,
+  Minimize2,
   Minus,
+  MousePointer2,
+  NotebookTabs,
   PenLine,
   Plus,
   Search,
+  SlidersHorizontal,
   Star,
   Trash2,
   Type,
@@ -116,9 +122,11 @@ function pointDistance(a: { x: number; y: number }, b: { x: number; y: number })
 }
 
 function App() {
+  const pageStageRef = useRef<HTMLDivElement | null>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const inkCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const backupInputRef = useRef<HTMLInputElement | null>(null)
   const gestureRef = useRef<{ x: number; y: number } | null>(null)
   const wheelRef = useRef(0)
   const [docs, setDocs] = useState<DocRecord[]>([])
@@ -127,9 +135,14 @@ function App() {
   const [pdfDoc, setPdfDoc] = useState<PdfDocument | null>(null)
   const [page, setPage] = useState(1)
   const [pageCount, setPageCount] = useState(0)
-  const [zoom, setZoom] = useState(1.15)
+  const [zoom, setZoom] = useState(1)
+  const [fitToScreen, setFitToScreen] = useState(true)
   const [navMode, setNavMode] = useState<NavMode>('buttons')
-  const [tool, setTool] = useState<Tool>('highlighter')
+  const [tool, setTool] = useState<Tool>('cursor')
+  const [showLibrary, setShowLibrary] = useState(false)
+  const [showTools, setShowTools] = useState(false)
+  const [showStudy, setShowStudy] = useState(false)
+  const [fullScreenReader, setFullScreenReader] = useState(true)
   const [color, setColor] = useState(colors[0])
   const [strokes, setStrokes] = useState<Stroke[]>([])
   const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([])
@@ -201,6 +214,34 @@ function App() {
     listStudyNotes(activeDocId).then((items) => setStudyNotes(items.sort((a, b) => b.updatedAt - a.updatedAt)))
     updateDocMeta(activeDocId, { lastPage: page })
   }, [activeDocId, page])
+
+  useEffect(() => {
+    if (!fitToScreen || !pdfDoc) return
+
+    let cancelled = false
+    async function fitPage() {
+      const stage = pageStageRef.current
+      if (!stage || !pdfDoc) return
+      const pdfPage = await pdfDoc.getPage(page)
+      if (cancelled) return
+      const viewport = pdfPage.getViewport({ scale: 1 })
+      const isMobile = window.innerWidth <= 760
+      const horizontalPadding = isMobile ? 16 : 56
+      const availableWidth = Math.max(280, stage.clientWidth - horizontalPadding)
+      const availableHeight = Math.max(360, stage.clientHeight - (isMobile ? 16 : 56))
+      const widthFit = availableWidth / viewport.width
+      const heightFit = availableHeight / viewport.height
+      const nextZoom = Math.max(0.35, Math.min(1.65, isMobile ? Math.min(widthFit, heightFit) : widthFit))
+      setZoom((current) => (Math.abs(current - nextZoom) > 0.02 ? nextZoom : current))
+    }
+
+    fitPage()
+    window.addEventListener('resize', fitPage)
+    return () => {
+      cancelled = true
+      window.removeEventListener('resize', fitPage)
+    }
+  }, [fitToScreen, page, pdfDoc])
 
   useEffect(() => {
     let cancelled = false
@@ -346,6 +387,7 @@ function App() {
     event.currentTarget.setPointerCapture(event.pointerId)
     const point = canvasPoint(event)
     gestureRef.current = { x: event.clientX, y: event.clientY }
+    if (tool === 'cursor') return
     if (tool === 'text') {
       addTextAnnotation(point)
       return
@@ -367,6 +409,7 @@ function App() {
   }
 
   function moveStroke(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (tool === 'cursor') return
     if (tool === 'eraser' && event.buttons === 1) {
       eraseAt(canvasPoint(event))
       return
@@ -542,7 +585,48 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  async function importBackup(files: FileList | null) {
+    if (!activeDocId || !files?.[0]) return
+    const raw = await files[0].text()
+    const backup = JSON.parse(raw) as {
+      activeDoc?: { page?: number }
+      pageStrokes?: Stroke[]
+      pageTextAnnotations?: TextAnnotation[]
+      pageNote?: string
+      studyNotes?: StudyNoteRecord[]
+      vocab?: VocabRecord[]
+    }
+    const targetPage = backup.activeDoc?.page || page
+    const now = currentTimestamp()
+
+    if (backup.pageStrokes) {
+      await saveStrokes(activeDocId, targetPage, backup.pageStrokes.map((item) => ({ ...item, page: targetPage })))
+      if (targetPage === page) setStrokes(backup.pageStrokes.map((item) => ({ ...item, page: targetPage })))
+    }
+    if (backup.pageTextAnnotations) {
+      const restoredText = backup.pageTextAnnotations.map((item) => ({ ...item, page: targetPage }))
+      await saveTextAnnotations(activeDocId, targetPage, restoredText)
+      if (targetPage === page) setTextAnnotations(restoredText)
+    }
+    if (typeof backup.pageNote === 'string') {
+      await saveNote({ id: `${activeDocId}:${targetPage}`, docId: activeDocId, page: targetPage, text: backup.pageNote, updatedAt: now })
+      if (targetPage === page) setNote(backup.pageNote)
+    }
+    if (backup.studyNotes?.length) {
+      const restored = backup.studyNotes.map((item) => ({ ...item, id: uid('study-note'), docId: activeDocId, updatedAt: now }))
+      await Promise.all(restored.map(saveStudyNote))
+      setStudyNotes((items) => [...restored, ...items].sort((a, b) => b.updatedAt - a.updatedAt))
+    }
+    if (backup.vocab?.length) {
+      const restored = backup.vocab.map((item) => ({ ...item, id: uid('vocab'), docId: activeDocId, createdAt: now }))
+      await Promise.all(restored.map(saveVocab))
+      setVocab((items) => [...restored, ...items].sort((a, b) => b.createdAt - a.createdAt))
+    }
+    setStatus('Backup berhasil di-import')
+  }
+
   const tools: { id: Tool; icon: React.ReactNode; label: string }[] = [
+    { id: 'cursor', icon: <MousePointer2 size={20} />, label: 'Cursor' },
     { id: 'pen', icon: <PenLine size={20} />, label: 'Pen' },
     { id: 'highlighter', icon: <Highlighter size={20} />, label: 'Highlight' },
     { id: 'line', icon: <Minus size={20} />, label: 'Garis' },
@@ -551,7 +635,23 @@ function App() {
   ]
 
   return (
-    <main className="app-shell">
+    <main
+      className={`app-shell ${showLibrary ? 'show-library' : ''} ${showTools ? 'show-tools' : ''} ${showStudy ? 'show-study' : ''} ${
+        fullScreenReader ? 'reader-fullscreen' : 'reader-windowed'
+      }`}
+    >
+      {(showLibrary || showTools || showStudy) && (
+        <button
+          className="mobile-scrim"
+          type="button"
+          aria-label="Tutup panel"
+          onClick={() => {
+            setShowLibrary(false)
+            setShowTools(false)
+            setShowStudy(false)
+          }}
+        />
+      )}
       <aside className="library-panel">
         <div className="brand-row">
           <BookOpen size={24} />
@@ -559,6 +659,9 @@ function App() {
             <h1>Deutsch PDF</h1>
             <span>{status}</span>
           </div>
+          <button className="panel-close" type="button" onClick={() => setShowLibrary(false)}>
+            Tutup
+          </button>
         </div>
 
         <input
@@ -572,6 +675,17 @@ function App() {
         <button className="primary-action" type="button" onClick={() => fileInputRef.current?.click()}>
           <FileUp size={20} />
           Import PDF
+        </button>
+        <input
+          ref={backupInputRef}
+          className="sr-only"
+          type="file"
+          accept="application/json"
+          onChange={(event) => importBackup(event.target.files)}
+        />
+        <button className="secondary-action" type="button" onClick={() => backupInputRef.current?.click()}>
+          <Download size={20} />
+          Import backup
         </button>
 
         <div className="hint-list">
@@ -640,10 +754,32 @@ function App() {
           </div>
 
           <div className="zoom-controls">
-            <button type="button" title="Zoom out" onClick={() => setZoom(Math.max(0.65, zoom - 0.1))}>
+            <button
+              type="button"
+              title="Zoom out"
+              onClick={() => {
+                setFitToScreen(false)
+                setZoom(Math.max(0.45, zoom - 0.1))
+              }}
+            >
               <ZoomOut size={18} />
             </button>
-            <button type="button" title="Zoom in" onClick={() => setZoom(Math.min(2.2, zoom + 0.1))}>
+            <button
+              type="button"
+              title="Fit"
+              className={fitToScreen ? 'selected' : ''}
+              onClick={() => setFitToScreen(true)}
+            >
+              <Maximize2 size={18} />
+            </button>
+            <button
+              type="button"
+              title="Zoom in"
+              onClick={() => {
+                setFitToScreen(false)
+                setZoom(Math.min(2.2, zoom + 0.1))
+              }}
+            >
               <ZoomIn size={18} />
             </button>
           </div>
@@ -685,7 +821,7 @@ function App() {
           ) : null}
         </div>
 
-        <div className={`page-stage ${navMode}-mode`} onWheel={handleWheel}>
+        <div ref={pageStageRef} className={`page-stage ${navMode}-mode tool-${tool}`} onWheel={handleWheel}>
           {activeDoc ? (
             <div className="canvas-stack">
               <canvas ref={pdfCanvasRef} className="pdf-canvas" />
@@ -731,9 +867,40 @@ function App() {
             </div>
           )}
         </div>
+        <nav className="mobile-reader-dock" aria-label="Mobile reader controls">
+          <button type="button" onClick={() => setShowLibrary(true)}>
+            <FolderOpen size={20} />
+            File
+          </button>
+          <button type="button" onClick={() => setShowTools(true)}>
+            <SlidersHorizontal size={20} />
+            Tools
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFitToScreen(true)
+              setFullScreenReader((value) => !value)
+            }}
+          >
+            {fullScreenReader ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+            {fullScreenReader ? 'Exit' : 'Full'}
+          </button>
+          <button type="button" onClick={() => setShowStudy(true)}>
+            <NotebookTabs size={20} />
+            Notes
+          </button>
+        </nav>
       </section>
 
       <aside className="study-panel">
+        <div className="panel-title study-panel-header">
+          <NotebookTabs size={18} />
+          <h2>Belajar</h2>
+          <button className="panel-close" type="button" onClick={() => setShowStudy(false)}>
+            Tutup
+          </button>
+        </div>
         <section>
           <div className="panel-title">
             <Bookmark size={18} />
@@ -839,6 +1006,10 @@ function App() {
         <button className="secondary-action" type="button" onClick={exportBackup}>
           <Download size={18} />
           Export backup
+        </button>
+        <button className="secondary-action" type="button" onClick={() => backupInputRef.current?.click()}>
+          <Download size={18} />
+          Import backup
         </button>
         <div className="mini-stats">
           <ListChecks size={18} />

@@ -10,11 +10,13 @@ PWA local-first untuk belajar bahasa Jerman dari PDF di iPad atau desktop.
 - Annotation layer untuk pen, highlighter, underline, strike, eraser, dan undo.
 - Tool teks untuk mengisi workbook langsung di atas PDF.
 - Mode pindah halaman: tombol, swipe kiri/kanan, dan scroll/gesture vertikal.
+- Mode cursor agar tidak selalu membuat coretan atau teks.
+- Mobile reader full-screen dengan drawer File, Tools, dan Notes.
 - Catatan per halaman.
 - Study Cards terstruktur untuk ringkasan, grammar, vocab, contoh kalimat, dan pertanyaan.
 - Vocab list per dokumen.
 - Search teks PDF jika PDF punya text layer.
-- Export backup JSON untuk catatan halaman aktif, Study Cards, dan vocab.
+- Export dan import backup JSON untuk catatan halaman aktif, teks, coretan, Study Cards, dan vocab.
 - PWA installable dan siap GitHub Pages.
 - Optional bundled PDFs lewat `public/pdfs/manifest.json`.
 
@@ -40,10 +42,20 @@ Setelah online, PDF itu akan muncul sebagai pilihan `PDF online` dan bisa disimp
 ## Cara pakai cepat
 
 1. Import PDF atau pilih PDF online jika tersedia.
-2. Pilih tool `T`, tap area workbook, lalu ketik jawaban.
-3. Pilih `Pen`, `Highlight`, atau `Garis` untuk menandai.
-4. Pilih mode halaman `+/-`, `Swipe`, atau `Scroll`.
-5. Simpan catatan belajar di `Catatan halaman` atau `Study Cards`.
+2. Gunakan `Cursor` untuk membaca tanpa membuat tanda.
+3. Pilih tool `T`, tap area workbook, lalu ketik jawaban.
+4. Pilih `Pen`, `Highlight`, atau `Garis` untuk menandai.
+5. Pilih mode halaman `+/-`, `Swipe`, atau `Scroll`.
+6. Di layar HP/iPad, buka tombol bawah: `File`, `Tools`, `Full/Exit`, dan `Notes`.
+7. Simpan catatan belajar di `Catatan halaman` atau `Study Cards`.
+
+## Penyimpanan anotasi
+
+Coretan, highlight, teks jawaban, catatan, dan Study Cards tidak mengubah PDF asli. Semuanya disimpan sebagai data terpisah di browser lewat IndexedDB.
+
+Gunakan `Export backup` untuk menyimpan anotasi ke file JSON. Gunakan `Import backup` untuk memasukkan lagi anotasi itu ke dokumen aktif di perangkat lain.
+
+Fitur export PDF final yang menyatukan PDF + anotasi bisa ditambahkan sebagai tahap berikutnya.
 
 ## Development
 
