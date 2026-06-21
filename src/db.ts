@@ -29,10 +29,12 @@ interface StudyDb extends DBSchema {
   strokes: {
     key: string
     value: StrokePage
+    indexes: { byDoc: string }
   }
   textAnnotations: {
     key: string
     value: TextPage
+    indexes: { byDoc: string }
   }
   notes: {
     key: string
@@ -51,13 +53,17 @@ interface StudyDb extends DBSchema {
   }
 }
 
-const dbPromise = openDB<StudyDb>('deutsch-pdf-study', 4, {
-  upgrade(db) {
+const dbPromise = openDB<StudyDb>('deutsch-pdf-study', 5, {
+  upgrade(db, oldVersion, _newVersion, transaction) {
     if (!db.objectStoreNames.contains('docs')) db.createObjectStore('docs', { keyPath: 'id' })
     if (!db.objectStoreNames.contains('files')) db.createObjectStore('files', { keyPath: 'id' })
-    if (!db.objectStoreNames.contains('strokes')) db.createObjectStore('strokes', { keyPath: 'id' })
+    if (!db.objectStoreNames.contains('strokes')) {
+      const strokes = db.createObjectStore('strokes', { keyPath: 'id' })
+      strokes.createIndex('byDoc', 'docId')
+    }
     if (!db.objectStoreNames.contains('textAnnotations')) {
-      db.createObjectStore('textAnnotations', { keyPath: 'id' })
+      const textAnnotations = db.createObjectStore('textAnnotations', { keyPath: 'id' })
+      textAnnotations.createIndex('byDoc', 'docId')
     }
     if (!db.objectStoreNames.contains('notes')) {
       const notes = db.createObjectStore('notes', { keyPath: 'id' })
@@ -71,6 +77,12 @@ const dbPromise = openDB<StudyDb>('deutsch-pdf-study', 4, {
       const studyNotes = db.createObjectStore('studyNotes', { keyPath: 'id' })
       studyNotes.createIndex('byDoc', 'docId')
       studyNotes.createIndex('byDocPage', ['docId', 'page'])
+    }
+    if (oldVersion > 0 && oldVersion < 5) {
+      const strokes = transaction.objectStore('strokes')
+      const textAnnotations = transaction.objectStore('textAnnotations')
+      if (!strokes.indexNames.contains('byDoc')) strokes.createIndex('byDoc', 'docId')
+      if (!textAnnotations.indexNames.contains('byDoc')) textAnnotations.createIndex('byDoc', 'docId')
     }
   },
 })
@@ -92,6 +104,35 @@ export async function getDoc(id: string): Promise<DocWithData | undefined> {
   const [doc, file] = await Promise.all([db.get('docs', id), db.get('files', id)])
   if (!doc || !file) return undefined
   return { ...doc, data: file.data }
+}
+
+export async function deleteDoc(id: string) {
+  const db = await dbPromise
+  const tx = db.transaction(
+    ['docs', 'files', 'strokes', 'textAnnotations', 'notes', 'vocab', 'studyNotes'],
+    'readwrite',
+  )
+
+  async function deleteIndexedRows(
+    storeName: 'strokes' | 'textAnnotations' | 'notes' | 'vocab' | 'studyNotes',
+  ) {
+    let cursor = await tx.objectStore(storeName).index('byDoc').openCursor(id)
+    while (cursor) {
+      await cursor.delete()
+      cursor = await cursor.continue()
+    }
+  }
+
+  await Promise.all([
+    tx.objectStore('docs').delete(id),
+    tx.objectStore('files').delete(id),
+    deleteIndexedRows('strokes'),
+    deleteIndexedRows('textAnnotations'),
+    deleteIndexedRows('notes'),
+    deleteIndexedRows('vocab'),
+    deleteIndexedRows('studyNotes'),
+  ])
+  await tx.done
 }
 
 export async function updateDocMeta(id: string, patch: Partial<Omit<DocRecord, 'id'>>) {

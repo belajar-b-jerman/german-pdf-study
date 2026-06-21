@@ -43,6 +43,7 @@ export type DocRecord = {
   updatedAt: number
   lastPage: number
   pageCount?: number
+  renderMode?: 'default' | 'compatibility'
 }
 
 export type DocWithData = DocRecord & {

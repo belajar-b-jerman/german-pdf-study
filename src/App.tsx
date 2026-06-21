@@ -15,6 +15,7 @@ import {
   NotebookTabs,
   PenLine,
   Plus,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   Star,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 import {
+  deleteDoc,
   deleteStudyNote,
   deleteVocab,
   getDoc,
@@ -59,11 +61,6 @@ import type {
 } from './types'
 
 const colors = ['#f2c94c', '#ee6c4d', '#3d8b74', '#2f80ed', '#111827']
-const suggestedFiles = [
-  'Netzwerk neu A1 Kursbuch.pdf',
-  'Netzwerk Neu A1 - Ubungsbuch.pdf',
-  'BAHAN AJAR BABAK A1 FULL.pdf',
-]
 const studyNoteKinds: { id: StudyNoteKind; label: string; prompt: string }[] = [
   { id: 'summary', label: 'Ringkasan', prompt: 'Apa inti halaman ini?' },
   { id: 'grammar', label: 'Grammar', prompt: 'Pola apa yang perlu diingat?' },
@@ -194,23 +191,31 @@ function App() {
       setStatus('Membuka PDF')
       const doc = await getDoc(activeDocId)
       if (!doc || cancelled) return
-      const loaded = await loadPdf(doc.data)
-      if (cancelled) return
-      setPdfDoc(loaded)
-      setPageCount(loaded.numPages)
-      setPage(Math.min(doc.lastPage || 1, loaded.numPages))
-      setDocs((items) =>
-        items.map((item) => (item.id === doc.id ? { ...item, pageCount: loaded.numPages } : item)),
-      )
-      await updateDocMeta(doc.id, { pageCount: loaded.numPages })
-      setStatus('Siap')
+      try {
+        const loaded = await loadPdf(doc.data, doc.renderMode === 'compatibility')
+        if (cancelled) return
+        setPdfDoc(loaded)
+        setPageCount(loaded.numPages)
+        setPage(Math.min(doc.lastPage || 1, loaded.numPages))
+        setDocs((items) =>
+          items.map((item) => (item.id === doc.id ? { ...item, pageCount: loaded.numPages } : item)),
+        )
+        await updateDocMeta(doc.id, { pageCount: loaded.numPages })
+        setStatus(doc.renderMode === 'compatibility' ? 'Siap - mode kompatibilitas' : 'Siap')
+      } catch (error) {
+        if (cancelled) return
+        console.error(error)
+        setPdfDoc(null)
+        setPageCount(0)
+        setStatus('PDF gagal dibuka')
+      }
     }
 
     openDoc()
     return () => {
       cancelled = true
     }
-  }, [activeDocId])
+  }, [activeDocId, activeDoc?.renderMode])
 
   useEffect(() => {
     if (!activeDocId) return
@@ -277,15 +282,23 @@ function App() {
 
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
       ctx.clearRect(0, 0, viewport.width, viewport.height)
-      await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise
-      if (!cancelled) setStatus('Siap')
+      try {
+        await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise
+        if (!cancelled) {
+          setStatus(activeDoc?.renderMode === 'compatibility' ? 'Siap - mode kompatibilitas' : 'Siap')
+        }
+      } catch (error) {
+        if (cancelled) return
+        console.error(error)
+        setStatus('Halaman gagal dirender')
+      }
     }
 
     renderPage()
     return () => {
       cancelled = true
     }
-  }, [pdfDoc, page, zoom])
+  }, [activeDoc?.renderMode, pdfDoc, page, zoom])
 
   useEffect(() => {
     const canvas = inkCanvasRef.current
@@ -348,6 +361,41 @@ function App() {
     setDocs([doc, ...docs].sort((a, b) => b.updatedAt - a.updatedAt))
     setActiveDocId(doc.id)
     setStatus('PDF online tersimpan offline')
+  }
+
+  async function removePdf(id: string) {
+    const doc = docs.find((item) => item.id === id)
+    if (!doc) return
+    const confirmed = window.confirm(
+      `Hapus "${doc.name}" dari perangkat ini? Semua coretan, teks, catatan, dan study card PDF ini juga akan dihapus.`,
+    )
+    if (!confirmed) return
+
+    setStatus('Menghapus PDF')
+    await deleteDoc(id)
+    const remaining = docs.filter((item) => item.id !== id)
+    setDocs(remaining)
+    if (activeDocId === id) {
+      setPdfDoc(null)
+      setPage(1)
+      setPageCount(0)
+      setStrokes([])
+      setTextAnnotations([])
+      setNote('')
+      setVocab([])
+      setStudyNotes([])
+      setActiveDocId(remaining[0]?.id ?? '')
+    }
+    setStatus('PDF dihapus')
+  }
+
+  async function toggleRenderMode(id: string) {
+    const doc = docs.find((item) => item.id === id)
+    if (!doc) return
+    const renderMode = doc.renderMode === 'compatibility' ? 'default' : 'compatibility'
+    setStatus('Memuat ulang tampilan PDF')
+    await updateDocMeta(id, { renderMode })
+    setDocs((items) => items.map((item) => (item.id === id ? { ...item, renderMode } : item)))
   }
 
   function canvasPoint(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -732,7 +780,10 @@ function App() {
           type="file"
           accept="application/pdf"
           multiple
-          onChange={(event) => handleFiles(event.target.files)}
+          onChange={(event) => {
+            handleFiles(event.target.files)
+            event.currentTarget.value = ''
+          }}
         />
         <button className="primary-action" type="button" onClick={() => fileInputRef.current?.click()}>
           <FileUp size={20} />
@@ -750,38 +801,54 @@ function App() {
           Import backup
         </button>
 
-        <div className="hint-list">
-          {suggestedFiles.map((name) => (
-            <span key={name}>{name}</span>
-          ))}
+        <div className="library-scroll">
+          {bundledPdfs.length > 0 ? (
+            <section className="library-group online-list">
+              <h2>PDF online</h2>
+              <div className="doc-list">
+                {bundledPdfs.map((pdf) => (
+                  <button className="doc-item" key={pdf.file} type="button" onClick={() => importBundledPdf(pdf)}>
+                    <span>{pdf.title}</span>
+                    <small>Simpan ke perangkat</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="library-group saved-library">
+            <h2>PDF tersimpan</h2>
+            <div className="doc-list">
+              {docs.map((doc) => (
+                <div className={`doc-row ${doc.id === activeDocId ? 'active' : ''}`} key={doc.id}>
+                  <button className="doc-item" type="button" onClick={() => setActiveDocId(doc.id)}>
+                    <span>{doc.name}</span>
+                    <small>
+                      {formatSize(doc.size)} {doc.pageCount ? `- ${doc.pageCount} hlm` : ''}
+                    </small>
+                  </button>
+                  <button
+                    className="doc-delete"
+                    type="button"
+                    title={`Hapus ${doc.name}`}
+                    aria-label={`Hapus ${doc.name}`}
+                    onClick={() => removePdf(doc.id)}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+              ))}
+              {docs.length === 0 ? <p className="library-empty">Belum ada PDF tersimpan.</p> : null}
+            </div>
+          </section>
         </div>
 
-        {bundledPdfs.length > 0 ? (
-          <div className="doc-list online-list">
-            {bundledPdfs.map((pdf) => (
-              <button className="doc-item" key={pdf.file} type="button" onClick={() => importBundledPdf(pdf)}>
-                <span>{pdf.title}</span>
-                <small>PDF online</small>
-              </button>
-            ))}
-          </div>
+        {activeDoc ? (
+          <button className="compatibility-action" type="button" onClick={() => toggleRenderMode(activeDoc.id)}>
+            <RefreshCw size={18} />
+            {activeDoc.renderMode === 'compatibility' ? 'Tampilan PDF normal' : 'Perbaiki teks PDF'}
+          </button>
         ) : null}
-
-        <div className="doc-list">
-          {docs.map((doc) => (
-            <button
-              className={`doc-item ${doc.id === activeDocId ? 'active' : ''}`}
-              key={doc.id}
-              type="button"
-              onClick={() => setActiveDocId(doc.id)}
-            >
-              <span>{doc.name}</span>
-              <small>
-                {formatSize(doc.size)} {doc.pageCount ? `- ${doc.pageCount} hlm` : ''}
-              </small>
-            </button>
-          ))}
-        </div>
       </aside>
 
       <section className="reader-panel">
