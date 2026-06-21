@@ -75,6 +75,10 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+function currentTimestamp() {
+  return new Date().getTime()
+}
+
 function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, width: number, height: number) {
   if (stroke.points.length === 0) return
   ctx.save()
@@ -256,12 +260,13 @@ function App() {
     for (const file of Array.from(files)) {
       if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue
       const data = await file.arrayBuffer()
+      const now = currentTimestamp()
       const doc: DocRecord = {
         id: uid('doc'),
         name: file.name,
         size: file.size,
-        addedAt: Date.now(),
-        updatedAt: Date.now(),
+        addedAt: now,
+        updatedAt: now,
         lastPage: 1,
       }
       await saveDoc(doc, data)
@@ -282,12 +287,13 @@ function App() {
       return
     }
     const data = await response.arrayBuffer()
+    const now = currentTimestamp()
     const doc: DocRecord = {
       id: uid('doc'),
       name: pdf.title || decodeURIComponent(pdf.file),
       size: pdf.size ?? data.byteLength,
-      addedAt: Date.now(),
-      updatedAt: Date.now(),
+      addedAt: now,
+      updatedAt: now,
       lastPage: 1,
     }
     await saveDoc(doc, data)
