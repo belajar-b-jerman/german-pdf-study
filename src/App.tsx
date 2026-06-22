@@ -170,7 +170,7 @@ function App() {
   const [strokes, setStrokes] = useState<Stroke[]>([])
   const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([])
   const [activeTextId, setActiveTextId] = useState('')
-  const [textSize, setTextSize] = useState(18)
+  const [textSize, setTextSize] = useState(16)
   const [draft, setDraft] = useState<Stroke | null>(null)
   const [note, setNote] = useState('')
   const [vocab, setVocab] = useState<VocabRecord[]>([])
@@ -434,9 +434,26 @@ function App() {
     }
   }
 
-  function applyZoom(nextZoom: number) {
+  function applyZoom(nextZoom: number, anchor?: { x: number; y: number }) {
+    const stage = pageStageRef.current
     setFitToScreen(false)
-    setZoom(clamp(nextZoom, 0.45, 2.4))
+    setZoom((current) => {
+      const bounded = clamp(nextZoom, 0.45, 2.4)
+      if (stage && anchor && Math.abs(bounded - current) > 0.001) {
+        const rect = stage.getBoundingClientRect()
+        const offsetX = anchor.x - rect.left
+        const offsetY = anchor.y - rect.top
+        const contentX = stage.scrollLeft + offsetX
+        const contentY = stage.scrollTop + offsetY
+        const factor = bounded / current
+
+        requestAnimationFrame(() => {
+          stage.scrollLeft = contentX * factor - offsetX
+          stage.scrollTop = contentY * factor - offsetY
+        })
+      }
+      return bounded
+    })
   }
 
   function toggleZoomMode() {
@@ -471,7 +488,10 @@ function App() {
     if (pinch.pointers.size !== 2 || pinch.startDistance <= 0) return true
     const [first, second] = Array.from(pinch.pointers.values())
     const nextDistance = pointDistance(first, second)
-    applyZoom(pinch.startZoom * (nextDistance / pinch.startDistance))
+    applyZoom(pinch.startZoom * (nextDistance / pinch.startDistance), {
+      x: (first.x + second.x) / 2,
+      y: (first.y + second.y) / 2,
+    })
     return true
   }
 
@@ -500,7 +520,7 @@ function App() {
       page,
       x: point.x,
       y: point.y,
-      width: 0.24,
+      width: 0.18,
       text: '',
       color,
       fontSize: textSize,
@@ -602,7 +622,7 @@ function App() {
     if (zoomMode) {
       event.preventDefault()
       const direction = event.deltaY > 0 ? -1 : 1
-      applyZoom(zoom + direction * 0.08)
+      applyZoom(zoom + direction * 0.08, { x: event.clientX, y: event.clientY })
       return
     }
     if (navMode !== 'scroll' || Math.abs(event.deltaY) < 45) return
@@ -643,7 +663,7 @@ function App() {
   }
 
   async function changeTextSize(delta: number) {
-    const nextSize = clamp((textAnnotations.find((item) => item.id === activeTextId)?.fontSize ?? textSize) + delta, 11, 38)
+    const nextSize = clamp((textAnnotations.find((item) => item.id === activeTextId)?.fontSize ?? textSize) + delta, 8, 38)
     setTextSize(nextSize)
     if (activeTextId) {
       await updateTextAnnotation(activeTextId, { fontSize: nextSize })
@@ -697,9 +717,9 @@ function App() {
       id: item.id,
       startX: event.clientX,
       startY: event.clientY,
-      originalWidth: item.width ?? 0.24,
+      originalWidth: item.width ?? 0.18,
       originalFontSize: item.fontSize,
-      latestWidth: item.width ?? 0.24,
+      latestWidth: item.width ?? 0.18,
       latestFontSize: item.fontSize,
     }
   }
@@ -710,8 +730,8 @@ function App() {
     if (!resize || !stack) return
     const deltaX = (event.clientX - resize.startX) / stack.width
     const deltaY = (event.clientY - resize.startY) / stack.height
-    const nextWidth = clamp(resize.originalWidth + deltaX, 0.12, 0.78)
-    const nextFontSize = Math.round(clamp(resize.originalFontSize + deltaY * 95, 11, 38))
+    const nextWidth = clamp(resize.originalWidth + deltaX, 0.055, 0.78)
+    const nextFontSize = Math.round(clamp(resize.originalFontSize + deltaY * 95, 8, 38))
     resize.latestWidth = nextWidth
     resize.latestFontSize = nextFontSize
     setTextAnnotations((items) =>
@@ -888,7 +908,7 @@ function App() {
 
   return (
     <main
-      className={`app-shell reader-fullscreen ${showLibrary ? 'show-library' : ''} ${showTools ? 'show-tools' : ''} ${showStudy ? 'show-study' : ''} ${showColors || tool === 'text' ? 'show-tools-extra' : ''}`}
+      className={`app-shell reader-fullscreen ${showLibrary ? 'show-library' : ''} ${showTools ? 'show-tools' : ''} ${showStudy ? 'show-study' : ''} ${zoomMode ? 'zoom-mode' : ''}`}
     >
       {(showLibrary || showStudy) && (
         <button
@@ -992,72 +1012,74 @@ function App() {
 
       <section className="reader-panel">
         <header className="reader-toolbar">
-          <div className="page-controls">
-            <button type="button" title="Halaman sebelumnya" onClick={() => setPage(Math.max(1, page - 1))}>
-              <Minus size={18} />
-            </button>
-            <span>
-              {page} / {pageCount || '-'}
-            </span>
-            <button type="button" title="Halaman berikutnya" onClick={() => setPage(Math.min(pageCount || 1, page + 1))}>
-              <Plus size={18} />
-            </button>
-          </div>
-
-          <div className="tool-group" role="toolbar" aria-label="Annotation tools">
-            {tools.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                title={item.label}
-                className={tool === item.id ? 'selected' : ''}
-                onClick={() => {
-                  setTool(item.id)
-                  setZoomMode(false)
-                }}
-              >
-                {item.icon}
+          <div className="toolbar-row toolbar-primary">
+            <div className="page-controls">
+              <button type="button" title="Halaman sebelumnya" onClick={() => setPage(Math.max(1, page - 1))}>
+                <Minus size={18} />
               </button>
-            ))}
-          </div>
-
-          <div className="zoom-controls">
-            <button
-              type="button"
-              title={zoomMode ? 'Fit halaman' : 'Zoom'}
-              className={zoomMode ? 'selected' : ''}
-              onClick={toggleZoomMode}
-            >
-              <ZoomIn size={18} />
-            </button>
-            <button
-              type="button"
-              title="Warna"
-              className={showColors ? 'selected color-menu-trigger' : 'color-menu-trigger'}
-              onClick={() => setShowColors((value) => !value)}
-              style={{ color }}
-            >
-              <Palette size={18} />
-            </button>
-            <button type="button" title="Undo" onClick={undo}>
-              <Undo2 size={20} />
-            </button>
-          </div>
-        </header>
-
-        <div className={`color-row ${showColors || tool === 'text' ? '' : 'empty-tools-row'}`}>
-          <div className="mode-switch" role="group" aria-label="Mode halaman">
-            {(['buttons', 'swipe', 'scroll'] as NavMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={navMode === mode ? 'selected' : ''}
-                onClick={() => setNavMode(mode)}
-              >
-                {mode === 'buttons' ? '+/-' : mode === 'swipe' ? 'Swipe' : 'Scroll'}
+              <span>
+                {page} / {pageCount || '-'}
+              </span>
+              <button type="button" title="Halaman berikutnya" onClick={() => setPage(Math.min(pageCount || 1, page + 1))}>
+                <Plus size={18} />
               </button>
-            ))}
+            </div>
+
+            <div className="zoom-controls">
+              <button
+                type="button"
+                title={zoomMode ? 'Fit halaman' : 'Zoom'}
+                className={zoomMode ? 'selected' : ''}
+                onClick={toggleZoomMode}
+              >
+                <ZoomIn size={18} />
+              </button>
+              <button
+                type="button"
+                title="Warna"
+                className={showColors ? 'selected color-menu-trigger' : 'color-menu-trigger'}
+                onClick={() => setShowColors((value) => !value)}
+                style={{ color }}
+              >
+                <Palette size={18} />
+              </button>
+              <button type="button" title="Undo" onClick={undo}>
+                <Undo2 size={20} />
+              </button>
+            </div>
           </div>
+
+          <div className="toolbar-row toolbar-tools">
+            <div className="tool-group" role="toolbar" aria-label="Annotation tools">
+              {tools.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  title={item.label}
+                  className={tool === item.id ? 'selected' : ''}
+                  onClick={() => {
+                    setTool(item.id)
+                    setZoomMode(false)
+                  }}
+                >
+                  {item.icon}
+                </button>
+              ))}
+            </div>
+
+            {tool === 'text' ? (
+              <div className="text-size-controls">
+                <button type="button" title="Kecilkan teks" onClick={() => changeTextSize(-1)}>
+                  <Minus size={16} />
+                </button>
+                <span>{activeTextId ? (textAnnotations.find((item) => item.id === activeTextId)?.fontSize ?? textSize) : textSize}</span>
+                <button type="button" title="Besarkan teks" onClick={() => changeTextSize(1)}>
+                  <Plus size={16} />
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           {showColors ? (
             <div className="color-popover" aria-label="Pilihan warna">
               {colors.map((item) => (
@@ -1076,17 +1098,21 @@ function App() {
               ))}
             </div>
           ) : null}
-          {tool === 'text' ? (
-            <div className="text-size-controls">
-              <button type="button" title="Kecilkan teks" onClick={() => changeTextSize(-1)}>
-                <Minus size={16} />
+        </header>
+
+        <div className="color-row">
+          <div className="mode-switch" role="group" aria-label="Mode halaman">
+            {(['buttons', 'swipe', 'scroll'] as NavMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={navMode === mode ? 'selected' : ''}
+                onClick={() => setNavMode(mode)}
+              >
+                {mode === 'buttons' ? '+/-' : mode === 'swipe' ? 'Swipe' : 'Scroll'}
               </button>
-              <span>{activeTextId ? (textAnnotations.find((item) => item.id === activeTextId)?.fontSize ?? textSize) : textSize}</span>
-              <button type="button" title="Besarkan teks" onClick={() => changeTextSize(1)}>
-                <Plus size={16} />
-              </button>
-            </div>
-          ) : null}
+            ))}
+          </div>
         </div>
 
         <div ref={pageStageRef} className={`page-stage ${navMode}-mode tool-${tool}`} onWheel={handleWheel}>
@@ -1112,7 +1138,7 @@ function App() {
                     style={{
                       left: `${item.x * 100}%`,
                       top: `${item.y * 100}%`,
-                      width: `${(item.width ?? 0.24) * 100}%`,
+                      width: `${(item.width ?? 0.18) * 100}%`,
                       color: item.color,
                     }}
                   >

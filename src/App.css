@@ -227,14 +227,24 @@
   position: sticky;
   top: 0;
   z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: 10px;
   padding: 12px;
   background: rgba(247, 248, 251, 0.95);
   border-bottom: 1px solid #dfe5ee;
   backdrop-filter: blur(12px);
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.toolbar-tools {
+  align-items: stretch;
 }
 
 .page-controls,
@@ -286,6 +296,10 @@
 }
 
 .color-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 12px;
   gap: 10px;
   padding: 6px;
   border: 1px solid #d7e0ea;
@@ -396,7 +410,7 @@
 
 .text-annotation {
   position: absolute;
-  min-width: 112px;
+  min-width: 72px;
   transform: translateY(-4px);
   pointer-events: auto;
 }
@@ -439,7 +453,9 @@
 }
 
 .text-annotation .drag-handle {
-  top: 20px;
+  right: auto;
+  bottom: -12px;
+  left: -12px;
   cursor: grab;
   touch-action: none;
 }
@@ -667,10 +683,6 @@ input {
   }
 
   .reader-fullscreen.show-tools .reader-panel {
-    grid-template-rows: auto auto minmax(0, 1fr);
-  }
-
-  .reader-fullscreen.show-tools:not(.show-tools-extra) .reader-panel {
     grid-template-rows: auto minmax(0, 1fr);
   }
 
@@ -724,33 +736,54 @@ input {
 
   .reader-fullscreen .reader-toolbar {
     align-items: center;
-    justify-content: stretch;
+    flex-direction: column;
+    justify-content: center;
     gap: 8px;
     padding: calc(8px + env(safe-area-inset-top)) 8px 8px;
     border-width: 0 0 1px;
   }
 
   .reader-fullscreen .color-row {
-    gap: 8px;
-    min-height: 44px;
-    padding: 6px 8px;
-    border-width: 0 0 1px;
-  }
-
-  .reader-fullscreen .color-row.empty-tools-row {
     display: none;
   }
 
-  .reader-fullscreen .page-controls,
+  .reader-fullscreen.show-tools .color-row {
+    display: none;
+  }
+
   .reader-fullscreen .mode-switch {
     display: none;
   }
 
+  .reader-fullscreen .toolbar-row {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .reader-fullscreen .toolbar-primary {
+    justify-content: space-between;
+  }
+
+  .reader-fullscreen .toolbar-tools {
+    justify-content: flex-start;
+  }
+
+  .reader-fullscreen .page-controls {
+    flex: 1 1 auto;
+    min-width: 130px;
+  }
+
+  .reader-fullscreen .page-controls span {
+    min-width: 70px;
+    font-size: 13px;
+  }
+
   .reader-fullscreen .tool-group {
     flex: 1 1 auto;
-    width: auto;
+    width: 100%;
     min-width: 0;
     overflow-x: auto;
+    padding-bottom: 1px;
   }
 
   .reader-fullscreen .zoom-controls {
@@ -758,18 +791,19 @@ input {
   }
 
   .reader-fullscreen .reader-toolbar button {
-    width: 38px;
-    min-height: 38px;
+    width: 42px;
+    min-height: 42px;
   }
 
   .reader-fullscreen .tool-group button,
   .reader-fullscreen .zoom-controls button {
-    flex: 0 0 38px;
+    flex: 0 0 42px;
   }
 
   .reader-fullscreen .color-popover {
-    flex: 0 0 auto;
-    padding: 4px 6px;
+    top: calc(100% + 8px);
+    right: 8px;
+    padding: 6px 8px;
   }
 
   .reader-fullscreen .color-dot {
@@ -796,11 +830,18 @@ input {
   }
 
   .reader-fullscreen.show-tools .page-stage {
-    height: calc(100svh - 126px - env(safe-area-inset-bottom));
+    height: calc(100svh - 174px - env(safe-area-inset-bottom));
   }
 
-  .reader-fullscreen.show-tools:not(.show-tools-extra) .page-stage {
-    height: calc(100svh - 78px - env(safe-area-inset-bottom));
+  .reader-fullscreen.zoom-mode .page-stage {
+    place-items: start center;
+    overflow: auto;
+    touch-action: none;
+  }
+
+  .reader-fullscreen.zoom-mode .canvas-stack {
+    max-width: none;
+    max-height: none;
   }
 
   .reader-fullscreen .canvas-stack {
@@ -872,12 +913,12 @@ input {
   }
 
   .reader-fullscreen .text-annotation {
-    min-width: 130px;
+    min-width: 56px;
   }
 
   .reader-fullscreen .text-annotation textarea {
-    min-height: 38px;
-    padding: 5px 8px;
+    min-height: 28px;
+    padding: 4px 6px;
   }
 
   .reader-windowed {
@@ -945,11 +986,7 @@ input {
     }
 
     .reader-fullscreen.show-tools .page-stage {
-      height: calc(100vh - 126px - env(safe-area-inset-bottom));
-    }
-
-    .reader-fullscreen.show-tools:not(.show-tools-extra) .page-stage {
-      height: calc(100vh - 78px - env(safe-area-inset-bottom));
+      height: calc(100vh - 174px - env(safe-area-inset-bottom));
     }
   }
 }
