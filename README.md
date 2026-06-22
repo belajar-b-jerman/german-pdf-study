@@ -11,7 +11,7 @@ PWA local-first untuk belajar bahasa Jerman dari PDF di iPad atau desktop.
 - Tool teks untuk mengisi workbook langsung di atas PDF.
 - Mode pindah halaman: tombol, swipe kiri/kanan, dan scroll/gesture vertikal.
 - Mode cursor agar tidak selalu membuat coretan atau teks.
-- Mobile reader full-screen dengan drawer File, Tools, dan Notes.
+- Mobile reader full-screen dengan drawer File, Tools ringkas, dan Notes.
 - Catatan per halaman.
 - Study Cards terstruktur untuk ringkasan, grammar, vocab, contoh kalimat, dan pertanyaan.
 - Vocab list per dokumen.
@@ -46,8 +46,10 @@ Setelah online, PDF itu akan muncul sebagai pilihan `PDF online` dan bisa disimp
 3. Pilih tool `T`, tap area workbook, lalu ketik jawaban.
 4. Pilih `Pen`, `Highlight`, atau `Garis` untuk menandai.
 5. Pilih mode halaman `+/-`, `Swipe`, atau `Scroll`.
-6. Di layar HP/iPad, buka tombol bawah: `File`, `Tools`, `Full/Exit`, dan `Notes`.
-7. Simpan catatan belajar di `Catatan halaman` atau `Study Cards`.
+6. Di layar HP/iPad, buka tombol bawah: `File`, `Prev`, `Tools`, `Next`, dan `Notes`.
+7. Di `Tools`, tombol kaca pembesar mengaktifkan zoom: scroll di laptop atau pinch di HP/iPad.
+8. Tombol palet membuka pilihan warna.
+9. Simpan catatan belajar di `Catatan halaman` atau `Study Cards`.
 
 ## Penyimpanan anotasi
 

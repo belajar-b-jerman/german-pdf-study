@@ -9,10 +9,10 @@ import {
   FolderOpen,
   Highlighter,
   ListChecks,
-  Maximize2,
   Minus,
   MousePointer2,
   NotebookTabs,
+  Palette,
   PenLine,
   Plus,
   RefreshCw,
@@ -23,7 +23,6 @@ import {
   Type,
   Undo2,
   ZoomIn,
-  ZoomOut,
 } from 'lucide-react'
 import './App.css'
 import {
@@ -99,7 +98,7 @@ function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, width: number
   ctx.moveTo(first.x * width, first.y * height)
 
   if (stroke.tool === 'line') {
-    const last = stroke.points.at(-1) ?? first
+    const last = stroke.points[stroke.points.length - 1] ?? first
     ctx.lineTo(last.x * width, last.y * height)
   } else {
     for (const point of stroke.points.slice(1)) {
@@ -115,6 +114,10 @@ function pointDistance(a: { x: number; y: number }, b: { x: number; y: number })
   const dx = a.x - b.x
   const dy = a.y - b.y
   return Math.sqrt(dx * dx + dy * dy)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
 }
 
 function App() {
@@ -133,6 +136,20 @@ function App() {
     latestX: number
     latestY: number
   } | null>(null)
+  const textResizeRef = useRef<{
+    id: string
+    startX: number
+    startY: number
+    originalWidth: number
+    originalFontSize: number
+    latestWidth: number
+    latestFontSize: number
+  } | null>(null)
+  const pinchRef = useRef<{
+    pointers: Map<number, { x: number; y: number }>
+    startDistance: number
+    startZoom: number
+  }>({ pointers: new Map(), startDistance: 0, startZoom: 1 })
   const wheelRef = useRef(0)
   const [docs, setDocs] = useState<DocRecord[]>([])
   const [bundledPdfs, setBundledPdfs] = useState<BundledPdf[]>([])
@@ -147,6 +164,8 @@ function App() {
   const [showLibrary, setShowLibrary] = useState(false)
   const [showTools, setShowTools] = useState(false)
   const [showStudy, setShowStudy] = useState(false)
+  const [showColors, setShowColors] = useState(false)
+  const [zoomMode, setZoomMode] = useState(false)
   const [color, setColor] = useState(colors[0])
   const [strokes, setStrokes] = useState<Stroke[]>([])
   const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([])
@@ -410,8 +429,58 @@ function App() {
 
   function boundedPagePoint(x: number, y: number) {
     return {
-      x: Math.max(0.01, Math.min(0.92, x)),
-      y: Math.max(0.01, Math.min(0.94, y)),
+      x: clamp(x, 0.01, 0.92),
+      y: clamp(y, 0.01, 0.94),
+    }
+  }
+
+  function applyZoom(nextZoom: number) {
+    setFitToScreen(false)
+    setZoom(clamp(nextZoom, 0.45, 2.4))
+  }
+
+  function toggleZoomMode() {
+    setShowColors(false)
+    setZoomMode((current) => {
+      if (current) {
+        setFitToScreen(true)
+        return false
+      }
+      setTool('cursor')
+      setFitToScreen(false)
+      return true
+    })
+  }
+
+  function trackPinchStart(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!zoomMode) return
+    const pinch = pinchRef.current
+    pinch.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (pinch.pointers.size === 2) {
+      const [first, second] = Array.from(pinch.pointers.values())
+      pinch.startDistance = pointDistance(first, second)
+      pinch.startZoom = zoom
+    }
+  }
+
+  function trackPinchMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!zoomMode) return false
+    const pinch = pinchRef.current
+    if (!pinch.pointers.has(event.pointerId)) return true
+    pinch.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (pinch.pointers.size !== 2 || pinch.startDistance <= 0) return true
+    const [first, second] = Array.from(pinch.pointers.values())
+    const nextDistance = pointDistance(first, second)
+    applyZoom(pinch.startZoom * (nextDistance / pinch.startDistance))
+    return true
+  }
+
+  function trackPinchEnd(pointerId: number) {
+    const pinch = pinchRef.current
+    pinch.pointers.delete(pointerId)
+    if (pinch.pointers.size < 2) {
+      pinch.startDistance = 0
+      pinch.startZoom = zoom
     }
   }
 
@@ -447,6 +516,8 @@ function App() {
   function startStroke(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!activeDocId) return
     event.currentTarget.setPointerCapture(event.pointerId)
+    trackPinchStart(event)
+    if (zoomMode) return
     const point = canvasPoint(event)
     gestureRef.current = { x: event.clientX, y: event.clientY }
     if (tool === 'cursor') return
@@ -471,6 +542,10 @@ function App() {
   }
 
   function moveStroke(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (zoomMode) {
+      trackPinchMove(event)
+      return
+    }
     if (tool === 'cursor') return
     if (tool === 'eraser' && event.buttons === 1) {
       eraseAt(canvasPoint(event))
@@ -482,6 +557,10 @@ function App() {
   }
 
   async function endStroke(event?: React.PointerEvent<HTMLCanvasElement>) {
+    if (event && zoomMode) {
+      trackPinchEnd(event.pointerId)
+      return
+    }
     if (event && gestureRef.current && tool === 'cursor') {
       const dx = event.clientX - gestureRef.current.x
       const dy = event.clientY - gestureRef.current.y
@@ -520,6 +599,12 @@ function App() {
   }
 
   function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
+    if (zoomMode) {
+      event.preventDefault()
+      const direction = event.deltaY > 0 ? -1 : 1
+      applyZoom(zoom + direction * 0.08)
+      return
+    }
     if (navMode !== 'scroll' || Math.abs(event.deltaY) < 45) return
     const now = Date.now()
     if (now - wheelRef.current < 550) return
@@ -557,6 +642,14 @@ function App() {
     await saveTextAnnotations(activeDocId, page, next)
   }
 
+  async function changeTextSize(delta: number) {
+    const nextSize = clamp((textAnnotations.find((item) => item.id === activeTextId)?.fontSize ?? textSize) + delta, 11, 38)
+    setTextSize(nextSize)
+    if (activeTextId) {
+      await updateTextAnnotation(activeTextId, { fontSize: nextSize })
+    }
+  }
+
   function startTextDrag(event: React.PointerEvent<HTMLButtonElement>, item: TextAnnotation) {
     event.preventDefault()
     event.stopPropagation()
@@ -592,6 +685,52 @@ function App() {
     const next = textAnnotations.map((item) => (item.id === drag.id ? { ...item, x: drag.latestX, y: drag.latestY } : item))
     setTextAnnotations(next)
     textDragRef.current = null
+    await saveTextAnnotations(activeDocId, page, next)
+  }
+
+  function startTextResize(event: React.PointerEvent<HTMLButtonElement>, item: TextAnnotation) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setActiveTextId(item.id)
+    textResizeRef.current = {
+      id: item.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      originalWidth: item.width ?? 0.24,
+      originalFontSize: item.fontSize,
+      latestWidth: item.width ?? 0.24,
+      latestFontSize: item.fontSize,
+    }
+  }
+
+  function moveTextResize(event: React.PointerEvent<HTMLButtonElement>) {
+    const resize = textResizeRef.current
+    const stack = pdfCanvasRef.current?.getBoundingClientRect()
+    if (!resize || !stack) return
+    const deltaX = (event.clientX - resize.startX) / stack.width
+    const deltaY = (event.clientY - resize.startY) / stack.height
+    const nextWidth = clamp(resize.originalWidth + deltaX, 0.12, 0.78)
+    const nextFontSize = Math.round(clamp(resize.originalFontSize + deltaY * 95, 11, 38))
+    resize.latestWidth = nextWidth
+    resize.latestFontSize = nextFontSize
+    setTextAnnotations((items) =>
+      items.map((item) =>
+        item.id === resize.id ? { ...item, width: nextWidth, fontSize: nextFontSize } : item,
+      ),
+    )
+  }
+
+  async function endTextResize() {
+    const resize = textResizeRef.current
+    if (!resize || !activeDocId) return
+    const next = textAnnotations.map((item) =>
+      item.id === resize.id
+        ? { ...item, width: resize.latestWidth, fontSize: resize.latestFontSize }
+        : item,
+    )
+    setTextAnnotations(next)
+    textResizeRef.current = null
     await saveTextAnnotations(activeDocId, page, next)
   }
 
@@ -749,7 +888,7 @@ function App() {
 
   return (
     <main
-      className={`app-shell reader-fullscreen ${showLibrary ? 'show-library' : ''} ${showTools ? 'show-tools' : ''} ${showStudy ? 'show-study' : ''}`}
+      className={`app-shell reader-fullscreen ${showLibrary ? 'show-library' : ''} ${showTools ? 'show-tools' : ''} ${showStudy ? 'show-study' : ''} ${showColors || tool === 'text' ? 'show-tools-extra' : ''}`}
     >
       {(showLibrary || showStudy) && (
         <button
@@ -872,49 +1011,41 @@ function App() {
                 type="button"
                 title={item.label}
                 className={tool === item.id ? 'selected' : ''}
-                onClick={() => setTool(item.id)}
+                onClick={() => {
+                  setTool(item.id)
+                  setZoomMode(false)
+                }}
               >
                 {item.icon}
               </button>
             ))}
-            <button type="button" title="Undo" onClick={undo}>
-              <Undo2 size={20} />
-            </button>
           </div>
 
           <div className="zoom-controls">
             <button
               type="button"
-              title="Zoom out"
-              onClick={() => {
-                setFitToScreen(false)
-                setZoom(Math.max(0.45, zoom - 0.1))
-              }}
-            >
-              <ZoomOut size={18} />
-            </button>
-            <button
-              type="button"
-              title="Fit"
-              className={fitToScreen ? 'selected' : ''}
-              onClick={() => setFitToScreen(true)}
-            >
-              <Maximize2 size={18} />
-            </button>
-            <button
-              type="button"
-              title="Zoom in"
-              onClick={() => {
-                setFitToScreen(false)
-                setZoom(Math.min(2.2, zoom + 0.1))
-              }}
+              title={zoomMode ? 'Fit halaman' : 'Zoom'}
+              className={zoomMode ? 'selected' : ''}
+              onClick={toggleZoomMode}
             >
               <ZoomIn size={18} />
+            </button>
+            <button
+              type="button"
+              title="Warna"
+              className={showColors ? 'selected color-menu-trigger' : 'color-menu-trigger'}
+              onClick={() => setShowColors((value) => !value)}
+              style={{ color }}
+            >
+              <Palette size={18} />
+            </button>
+            <button type="button" title="Undo" onClick={undo}>
+              <Undo2 size={20} />
             </button>
           </div>
         </header>
 
-        <div className="color-row">
+        <div className={`color-row ${showColors || tool === 'text' ? '' : 'empty-tools-row'}`}>
           <div className="mode-switch" role="group" aria-label="Mode halaman">
             {(['buttons', 'swipe', 'scroll'] as NavMode[]).map((mode) => (
               <button
@@ -927,23 +1058,31 @@ function App() {
               </button>
             ))}
           </div>
-          {colors.map((item) => (
-            <button
-              key={item}
-              className={`color-dot ${color === item ? 'selected' : ''}`}
-              style={{ background: item }}
-              type="button"
-              title={item}
-              onClick={() => setColor(item)}
-            />
-          ))}
+          {showColors ? (
+            <div className="color-popover" aria-label="Pilihan warna">
+              {colors.map((item) => (
+                <button
+                  key={item}
+                  className={`color-dot ${color === item ? 'selected' : ''}`}
+                  style={{ background: item }}
+                  type="button"
+                  title={item}
+                  onClick={() => {
+                    setColor(item)
+                    if (activeTextId) updateTextAnnotation(activeTextId, { color: item })
+                    setShowColors(false)
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
           {tool === 'text' ? (
             <div className="text-size-controls">
-              <button type="button" title="Kecilkan teks" onClick={() => setTextSize(Math.max(12, textSize - 1))}>
+              <button type="button" title="Kecilkan teks" onClick={() => changeTextSize(-1)}>
                 <Minus size={16} />
               </button>
-              <span>{textSize}</span>
-              <button type="button" title="Besarkan teks" onClick={() => setTextSize(Math.min(30, textSize + 1))}>
+              <span>{activeTextId ? (textAnnotations.find((item) => item.id === activeTextId)?.fontSize ?? textSize) : textSize}</span>
+              <button type="button" title="Besarkan teks" onClick={() => changeTextSize(1)}>
                 <Plus size={16} />
               </button>
             </div>
@@ -960,7 +1099,10 @@ function App() {
                 onPointerDown={startStroke}
                 onPointerMove={moveStroke}
                 onPointerUp={endStroke}
-                onPointerCancel={() => setDraft(null)}
+                onPointerCancel={(event) => {
+                  trackPinchEnd(event.pointerId)
+                  setDraft(null)
+                }}
               />
               <div className="text-layer" aria-label="Text answers">
                 {textAnnotations.map((item) => (
@@ -992,6 +1134,17 @@ function App() {
                       onPointerCancel={endTextDrag}
                     >
                       <MousePointer2 size={14} />
+                    </button>
+                    <button
+                      className="resize-handle"
+                      type="button"
+                      title="Ubah ukuran teks"
+                      onPointerDown={(event) => startTextResize(event, item)}
+                      onPointerMove={moveTextResize}
+                      onPointerUp={endTextResize}
+                      onPointerCancel={endTextResize}
+                    >
+                      <Plus size={14} />
                     </button>
                     <button type="button" title="Hapus teks" onClick={() => removeTextAnnotation(item.id)}>
                       <Trash2 size={14} />
