@@ -460,7 +460,6 @@ function App() {
     setShowColors(false)
     setZoomMode((current) => {
       if (current) {
-        setFitToScreen(true)
         return false
       }
       setTool('cursor')
